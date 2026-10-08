@@ -278,24 +278,37 @@ jobs:
       # DOWNLOAD LINUXDEPLOY
       # ========================================================
 
+
       - name: Download linuxdeploy
         run: |
           echo "Downloading:"
           echo "${{ matrix.appimage_tool }}"
 
-          wget \
+          URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.appimage_tool }}"
+
+          curl \
+            -L \
             --fail \
-            --show-progress \
-            -O linuxdeploy.AppImage \
-            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.appimage_tool }}"
+            --show-error \
+            --retry 3 \
+            --retry-delay 2 \
+            -o linuxdeploy.AppImage \
+            "$URL"
+
+          if [ ! -s linuxdeploy.AppImage ]; then
+            echo "ERROR: linuxdeploy download is empty."
+            exit 1
+          fi
 
           chmod +x linuxdeploy.AppImage
 
           echo
-          echo "linuxdeploy:"
+          echo "Downloaded file:"
+          ls -lh linuxdeploy.AppImage
+
+          echo
+          echo "File type:"
           file linuxdeploy.AppImage
-
-
       # ========================================================
       # CREATE APPDIR
       # ========================================================
