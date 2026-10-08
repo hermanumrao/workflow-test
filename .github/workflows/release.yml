@@ -55,23 +55,35 @@ jobs:
       - name: Build AppImage (Linux x86_64)
         if: matrix.pkg_type == 'linux'
         run: |
-          # Fetch linuxdeploy tool
+          # Download linuxdeploy and appimage plugin
           wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage
-          
-          # Create AppDir structure
+
+          # Setup AppDir
           mkdir -p AppDir/usr/bin
           cp build/app AppDir/usr/bin/
-          
-          # Generate desktop integration files
-          echo "[Desktop Entry]\nType=Application\nName=CppDevOpsDemo\nExec=app\nCategories=Utility;" > AppDir/app.desktop
-          touch AppDir/app.png
-          
-          # Extract and run linuxdeploy to produce AppImage
+
+          # Create a valid desktop file using multiline block
+          cat << 'EOF' > AppDir/app.desktop
+            [Desktop Entry]
+            Type=Application
+            Name=CppDevOpsDemo
+            Exec=app
+            Icon=app
+            Categories=Utility;
+            EOF
+
+          # Create a placeholder icon
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
+          convert -size 256x256 xc:blue AppDir/usr/share/icons/hicolor/256x256/apps/app.png || touch AppDir/app.png
+
+          # Build AppImage
           ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run --appdir AppDir --output appimage
-          
+
+          mkdir -p dist
           mv CppDevOpsDemo-*.AppImage dist/CppDevOpsDemo-x86_64.AppImage
 
+      
       # ---------------------------------------------------------
       # WINDOWS PACKAGING (.msi)
       # ---------------------------------------------------------
