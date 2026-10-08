@@ -291,79 +291,58 @@ jobs:
 
       - name: Download linuxdeploy
         run: |
-          echo "=========================================="
-          echo "LINUXDEPLOY"
-          echo "=========================================="
+          URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.appimage_tool }}"
 
-          URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.linuxdeploy }}"
+          echo "========================================"
+          echo "ARCH: ${{ matrix.arch }}"
+          echo "APPIMAGE TOOL: ${{ matrix.appimage_tool }}"
+          echo "DOWNLOAD URL: $URL"
+          echo "OUTPUT FILE: linuxdeploy.AppImage"
+          echo "========================================"
 
-          echo "Downloading:"
-          echo "$URL"
-
-          curl \
-            -L \
-            --fail \
-            --show-error \
-            --retry 5 \
-            --retry-delay 2 \
+          curl -L --fail --show-error --retry 3 --retry-delay 2 \
             -o linuxdeploy.AppImage \
             "$URL"
 
-          if [ ! -s linuxdeploy.AppImage ]; then
-            echo "ERROR: linuxdeploy download is empty."
-            exit 1
-          fi
-
           chmod +x linuxdeploy.AppImage
 
-          echo
-          echo "Downloaded file:"
-          ls -lh linuxdeploy.AppImage
+          echo "Downloaded files:"
+          find . -maxdepth 2 -type f -print
 
-          echo
-          echo "File type:"
-          file linuxdeploy.AppImage
+            # ========================================================
+            # VERIFY LINUXDEPLOY ARCHITECTURE
+            # ========================================================
 
-          echo
-          echo "ELF information:"
-          readelf -h linuxdeploy.AppImage | \
-            grep -E "Class|Machine|Type"
+            - name: Verify linuxdeploy architecture
+              run: |
+                MACHINE=$(uname -m)
 
+                echo "Runner:"
+                echo "$MACHINE"
 
-      # ========================================================
-      # VERIFY LINUXDEPLOY ARCHITECTURE
-      # ========================================================
+                echo
+                echo "linuxdeploy:"
+                file linuxdeploy.AppImage
 
-      - name: Verify linuxdeploy architecture
-        run: |
-          MACHINE=$(uname -m)
+                if [ "$MACHINE" = "x86_64" ]; then
 
-          echo "Runner:"
-          echo "$MACHINE"
+                  if ! file linuxdeploy.AppImage | grep -qi "x86-64"; then
+                    echo "ERROR: linuxdeploy is not an x86_64 binary."
+                    exit 1
+                  fi
 
-          echo
-          echo "linuxdeploy:"
-          file linuxdeploy.AppImage
+                elif [ "$MACHINE" = "aarch64" ]; then
 
-          if [ "$MACHINE" = "x86_64" ]; then
+                  if ! file linuxdeploy.AppImage | grep -qi "ARM aarch64"; then
+                    echo "ERROR: linuxdeploy is not an ARM64 binary."
+                    exit 1
+                  fi
 
-            if ! file linuxdeploy.AppImage | grep -qi "x86-64"; then
-              echo "ERROR: linuxdeploy is not an x86_64 binary."
-              exit 1
-            fi
-
-          elif [ "$MACHINE" = "aarch64" ]; then
-
-            if ! file linuxdeploy.AppImage | grep -qi "ARM aarch64"; then
-              echo "ERROR: linuxdeploy is not an ARM64 binary."
-              exit 1
-            fi
-
-          else
-            echo "ERROR: Unsupported architecture:"
-            echo "$MACHINE"
-            exit 1
-          fi
+                else
+                  echo "ERROR: Unsupported architecture:"
+                  echo "$MACHINE"
+                  exit 1
+                fi
 
 
       # ========================================================
