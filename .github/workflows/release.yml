@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write
 
+
 jobs:
 
   # ============================================================
@@ -34,11 +35,12 @@ jobs:
           - arch: x86_64
             runner: ubuntu-24.04
 
-            appimage_tool: linuxdeploy-x86_64.AppImage
+            linuxdeploy: linuxdeploy-x86_64.AppImage
 
             appimage_name: CppDevOpsDemo-linux-x86_64.AppImage
             deb_name: CppDevOpsDemo-linux-x86_64.deb
             rpm_name: CppDevOpsDemo-linux-x86_64.rpm
+
 
           # ----------------------------------------------------
           # ARM64
@@ -47,7 +49,7 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
 
-            appimage_tool: linuxdeploy-aarch64.AppImage
+            linuxdeploy: linuxdeploy-aarch64.AppImage
 
             appimage_name: CppDevOpsDemo-linux-arm64.AppImage
             deb_name: CppDevOpsDemo-linux-arm64.deb
@@ -71,7 +73,7 @@ jobs:
       - name: Show system information
         run: |
           echo "=========================================="
-          echo "System"
+          echo "SYSTEM"
           echo "=========================================="
 
           uname -a
@@ -90,10 +92,10 @@ jobs:
 
 
       # ========================================================
-      # INSTALL LINUX PACKAGING DEPENDENCIES
+      # INSTALL DEPENDENCIES
       # ========================================================
 
-      - name: Install packaging dependencies
+      - name: Install Linux dependencies
         run: |
           sudo apt-get update
 
@@ -103,43 +105,50 @@ jobs:
             dpkg-dev \
             rpm \
             file \
-            wget \
             curl \
-            fuse3
+            fuse3 \
+            libfuse2t64 \
+            imagemagick \
+            squashfs-tools \
+            binutils
 
           echo
           echo "=========================================="
-          echo "Packaging tools"
+          echo "PACKAGING TOOLS"
           echo "=========================================="
 
-          which dpkg-deb
-          which rpm
-          which rpmbuild || true
+          echo "dpkg-deb:"
+          dpkg-deb --version | head -n 1
 
           echo
-          echo "RPM:"
-          rpm --version || true
+          echo "rpm:"
+          rpm --version
 
           echo
           echo "rpmbuild:"
-          rpmbuild --version || true
+          rpmbuild --version
+
+          echo
+          echo "ImageMagick:"
+          convert --version | head -n 1
+
+          echo
+          echo "FUSE:"
+          ldconfig -p | grep libfuse || true
 
 
       # ========================================================
-      # HARD FAIL IF RPM BUILD TOOL IS MISSING
+      # VERIFY RPM
       # ========================================================
 
       - name: Verify RPM build environment
         run: |
           if ! command -v rpmbuild >/dev/null 2>&1; then
             echo "ERROR: rpmbuild is not available."
-            echo
-            echo "Installed RPM tools:"
-            dpkg -l | grep -E '^ii.*rpm' || true
             exit 1
           fi
 
-          echo "rpmbuild is available:"
+          echo "rpmbuild:"
           rpmbuild --version
 
 
@@ -156,13 +165,13 @@ jobs:
 
 
       # ========================================================
-      # SHOW CMAKE TARGET ARCHITECTURE
+      # SHOW CMAKE ARCHITECTURE
       # ========================================================
 
       - name: Show CMake architecture
         run: |
           echo "=========================================="
-          echo "CMake architecture"
+          echo "CMAKE"
           echo "=========================================="
 
           grep \
@@ -189,7 +198,7 @@ jobs:
       - name: Verify executable
         run: |
           echo "=========================================="
-          echo "Executable"
+          echo "EXECUTABLE"
           echo "=========================================="
 
           if [ ! -f build/app ]; then
@@ -200,7 +209,7 @@ jobs:
           file build/app
 
           echo
-          echo "Runner:"
+          echo "Runner architecture:"
           uname -m
 
 
@@ -226,6 +235,7 @@ jobs:
             -G DEB \
             -B ../dist
 
+
       - name: Rename DEB
         run: |
           DEB_FILE=$(find dist \
@@ -235,7 +245,7 @@ jobs:
             | head -n 1)
 
           if [ -z "$DEB_FILE" ]; then
-            echo "ERROR: No DEB package was generated."
+            echo "ERROR: DEB package was not generated."
             exit 1
           fi
 
@@ -256,6 +266,7 @@ jobs:
             -G RPM \
             -B ../dist
 
+
       - name: Rename RPM
         run: |
           RPM_FILE=$(find dist \
@@ -265,7 +276,7 @@ jobs:
             | head -n 1)
 
           if [ -z "$RPM_FILE" ]; then
-            echo "ERROR: No RPM package was generated."
+            echo "ERROR: RPM package was not generated."
             exit 1
           fi
 
@@ -278,19 +289,22 @@ jobs:
       # DOWNLOAD LINUXDEPLOY
       # ========================================================
 
-
       - name: Download linuxdeploy
         run: |
-          echo "Downloading:"
-          echo "${{ matrix.appimage_tool }}"
+          echo "=========================================="
+          echo "LINUXDEPLOY"
+          echo "=========================================="
 
-          URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.appimage_tool }}"
+          URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.linuxdeploy }}"
+
+          echo "Downloading:"
+          echo "$URL"
 
           curl \
             -L \
             --fail \
             --show-error \
-            --retry 3 \
+            --retry 5 \
             --retry-delay 2 \
             -o linuxdeploy.AppImage \
             "$URL"
@@ -309,17 +323,90 @@ jobs:
           echo
           echo "File type:"
           file linuxdeploy.AppImage
+
+          echo
+          echo "ELF information:"
+          readelf -h linuxdeploy.AppImage | \
+            grep -E "Class|Machine|Type"
+
+
+      # ========================================================
+      # VERIFY LINUXDEPLOY ARCHITECTURE
+      # ========================================================
+
+      - name: Verify linuxdeploy architecture
+        run: |
+          MACHINE=$(uname -m)
+
+          echo "Runner:"
+          echo "$MACHINE"
+
+          echo
+          echo "linuxdeploy:"
+          file linuxdeploy.AppImage
+
+          if [ "$MACHINE" = "x86_64" ]; then
+
+            if ! file linuxdeploy.AppImage | grep -qi "x86-64"; then
+              echo "ERROR: linuxdeploy is not an x86_64 binary."
+              exit 1
+            fi
+
+          elif [ "$MACHINE" = "aarch64" ]; then
+
+            if ! file linuxdeploy.AppImage | grep -qi "ARM aarch64"; then
+              echo "ERROR: linuxdeploy is not an ARM64 binary."
+              exit 1
+            fi
+
+          else
+            echo "ERROR: Unsupported architecture:"
+            echo "$MACHINE"
+            exit 1
+          fi
+
+
+      # ========================================================
+      # VERIFY LINUXDEPLOY RUNTIME
+      # ========================================================
+
+      - name: Verify linuxdeploy runtime
+        run: |
+          echo "=========================================="
+          echo "TESTING LINUXDEPLOY"
+          echo "=========================================="
+
+          echo
+          echo "Dynamic dependencies:"
+          ldd ./linuxdeploy.AppImage || true
+
+          echo
+          echo "AppImage runtime:"
+          ./linuxdeploy.AppImage \
+            --appimage-extract-and-run \
+            --version
+
+
       # ========================================================
       # CREATE APPDIR
       # ========================================================
 
       - name: Create AppDir
         run: |
+          echo "=========================================="
+          echo "APPDIR"
+          echo "=========================================="
+
           rm -rf AppDir
 
           mkdir -p \
             AppDir/usr/bin \
-            AppDir/usr/share/applications
+            AppDir/usr/share/applications \
+            AppDir/usr/share/icons/hicolor/16x16/apps \
+            AppDir/usr/share/icons/hicolor/32x32/apps \
+            AppDir/usr/share/icons/hicolor/64x64/apps \
+            AppDir/usr/share/icons/hicolor/128x128/apps \
+            AppDir/usr/share/icons/hicolor/256x256/apps
 
           cp \
             build/app \
@@ -328,34 +415,50 @@ jobs:
           chmod +x \
             AppDir/usr/bin/app
 
+          echo "Application:"
+          file AppDir/usr/bin/app
+
+
       # ========================================================
-      # CREATE APPIMAGE ICON
+      # INSTALL REAL APPLICATION LOGO
       # ========================================================
 
-      - name: Create AppImage icon
+      - name: Install application icon
         run: |
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          echo "=========================================="
+          echo "APPLICATION ICON"
+          echo "=========================================="
 
-          # Create a simple valid PNG icon.
-          # Uses ImageMagick if available.
-          if command -v convert >/dev/null 2>&1; then
-            convert \
-              -size 256x256 \
-              xc:blue \
-              AppDir/usr/share/icons/hicolor/256x256/apps/CppDevOpsDemo.png
-          else
-            echo "ImageMagick not available, installing it..."
-            sudo apt-get update
-            sudo apt-get install -y imagemagick
+          LOGO="assets/logo/test_logo.png"
 
-            convert \
-              -size 256x256 \
-              xc:blue \
-              AppDir/usr/share/icons/hicolor/256x256/apps/CppDevOpsDemo.png
+          if [ ! -f "$LOGO" ]; then
+            echo "ERROR: Logo not found:"
+            echo "$LOGO"
+            exit 1
           fi
 
-          file \
-            AppDir/usr/share/icons/hicolor/256x256/apps/CppDevOpsDemo.png
+          echo "Source logo:"
+          file "$LOGO"
+
+          for SIZE in 16 32 64 128 256; do
+
+            convert \
+              "$LOGO" \
+              -background none \
+              -resize "${SIZE}x${SIZE}" \
+              -gravity center \
+              -extent "${SIZE}x${SIZE}" \
+              "AppDir/usr/share/icons/hicolor/${SIZE}x${SIZE}/apps/CppDevOpsDemo.png"
+
+          done
+
+          echo
+          echo "Generated icons:"
+
+          find AppDir/usr/share/icons \
+            -type f \
+            -name "CppDevOpsDemo.png" \
+            -exec file {} \;
 
 
       # ========================================================
@@ -366,21 +469,39 @@ jobs:
         run: |
           cat > AppDir/usr/share/applications/CppDevOpsDemo.desktop << 'EOF'
           [Desktop Entry]
+          Version=1.0
           Type=Application
           Name=CppDevOpsDemo
+          GenericName=C++ Development Demo
           Comment=Automated Cross-Platform C++ Application
           Exec=app
           Icon=CppDevOpsDemo
           Terminal=true
-          Categories=Utility;
+          Categories=Development;Utility;
           EOF
 
           cp \
             AppDir/usr/share/applications/CppDevOpsDemo.desktop \
             AppDir/CppDevOpsDemo.desktop
 
-          echo "Desktop entry:"
+          echo "Desktop file:"
           cat AppDir/CppDevOpsDemo.desktop
+
+
+      # ========================================================
+      # VERIFY APPDIR
+      # ========================================================
+
+      - name: Verify AppDir
+        run: |
+          echo "=========================================="
+          echo "APPDIR CONTENTS"
+          echo "=========================================="
+
+          find AppDir \
+            -maxdepth 6 \
+            -type f \
+            -print
 
 
       # ========================================================
@@ -393,7 +514,7 @@ jobs:
 
         run: |
           echo "=========================================="
-          echo "Building AppImage"
+          echo "BUILDING APPIMAGE"
           echo "=========================================="
 
           rm -f ./*.AppImage
@@ -407,7 +528,8 @@ jobs:
           echo "linuxdeploy finished."
 
           echo
-          echo "Generated AppImage files:"
+          echo "Generated AppImages:"
+
           find . \
             -type f \
             -iname "*.AppImage" \
@@ -422,25 +544,14 @@ jobs:
       - name: Rename AppImage
         run: |
           echo "=========================================="
-          echo "Searching for generated AppImage"
+          echo "FINDING APPIMAGE"
           echo "=========================================="
 
-          echo "Current directory:"
-          pwd
-
-          echo
-          echo "Top-level files:"
-          ls -lah
-
-          echo
-          echo "All AppImage files:"
           find . \
             -type f \
             -iname "*.AppImage" \
             -print
 
-          # Find the AppImage generated by linuxdeploy.
-          # Exclude the linuxdeploy executable itself.
           APPIMAGE_FILE=$(find . \
             -type f \
             -iname "*.AppImage" \
@@ -451,20 +562,19 @@ jobs:
           if [ -z "$APPIMAGE_FILE" ]; then
             echo
             echo "ERROR: AppImage was not generated."
+
             echo
             echo "AppDir contents:"
-            find AppDir -maxdepth 4 -type f -print || true
-            echo
-            echo "Directory contents:"
-            find . -maxdepth 3 -type f -print || true
+            find AppDir \
+              -type f \
+              -print || true
+
             exit 1
           fi
 
           echo
           echo "Found AppImage:"
           echo "$APPIMAGE_FILE"
-
-          mkdir -p dist
 
           cp \
             "$APPIMAGE_FILE" \
@@ -485,14 +595,13 @@ jobs:
 
 
       # ========================================================
-      # VERIFY ALL PACKAGES
+      # VERIFY LINUX PACKAGES
       # ========================================================
 
-      - name: Verify packages
+      - name: Verify Linux packages
         run: |
-          echo
           echo "=========================================="
-          echo "FINAL PACKAGES"
+          echo "FINAL LINUX PACKAGES"
           echo "=========================================="
 
           ls -lh dist/
@@ -501,15 +610,13 @@ jobs:
           echo "File information:"
           file dist/*
 
-          echo
-          echo "Package count:"
-
           COUNT=$(find dist \
             -maxdepth 1 \
             -type f \
             | wc -l)
 
-          echo "$COUNT"
+          echo
+          echo "Package count: $COUNT"
 
           if [ "$COUNT" -ne 3 ]; then
             echo "ERROR: Expected exactly 3 Linux packages."
@@ -518,7 +625,7 @@ jobs:
 
 
       # ========================================================
-      # UPLOAD
+      # UPLOAD LINUX ARTIFACTS
       # ========================================================
 
       - name: Upload Linux packages
@@ -557,11 +664,11 @@ jobs:
         shell: powershell
         run: |
           Write-Host "=========================================="
-          Write-Host "Windows environment"
+          Write-Host "WINDOWS"
           Write-Host "=========================================="
 
           Write-Host "Architecture:"
-          $env:PROCESSOR_ARCHITECTURE
+          Write-Host $env:PROCESSOR_ARCHITECTURE
 
           Write-Host ""
           Write-Host "CMake:"
@@ -569,29 +676,7 @@ jobs:
 
 
       # ========================================================
-      # CHECK WIX
-      # ========================================================
-
-      - name: Check WiX
-        shell: powershell
-        run: |
-          Write-Host "=========================================="
-          Write-Host "WiX"
-          Write-Host "=========================================="
-
-          $wix = Get-Command candle.exe -ErrorAction SilentlyContinue
-
-          if ($wix) {
-              Write-Host "WiX already available:"
-              $wix.Source
-          }
-          else {
-              Write-Host "WiX not found."
-          }
-
-
-      # ========================================================
-      # INSTALL WIX 3.14
+      # INSTALL WIX
       # ========================================================
 
       - name: Install WiX Toolset
@@ -600,32 +685,39 @@ jobs:
           $wix = Get-Command candle.exe -ErrorAction SilentlyContinue
 
           if (-not $wix) {
+
               choco install wixtoolset `
                 --version=3.14.1 `
                 --no-progress `
                 -y
           }
 
-          Write-Host ""
-          Write-Host "Searching for candle.exe..."
+          $paths = @(
+              "C:\Program Files (x86)\WiX Toolset v3.14\bin",
+              "C:\Program Files (x86)\WiX Toolset v3.11\bin"
+          )
 
-          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+          foreach ($path in $paths) {
 
-          if (-not $candle) {
-              $paths = @(
-                  "C:\Program Files (x86)\WiX Toolset v3.14\bin",
-                  "C:\Program Files (x86)\WiX Toolset v3.11\bin"
-              )
+              if (Test-Path "$path\candle.exe") {
 
-              foreach ($path in $paths) {
-                  if (Test-Path "$path\candle.exe") {
-                      $env:PATH = "$path;$env:PATH"
-                      break
-                  }
+                  $env:PATH = "$path;$env:PATH"
+
+                  # Persist PATH for later GitHub Actions steps
+                  Add-Content `
+                    $env:GITHUB_PATH `
+                    $path
+
+                  break
               }
           }
 
+          Write-Host ""
+          Write-Host "WiX candle:"
           candle.exe -?
+
+          Write-Host ""
+          Write-Host "WiX light:"
           light.exe -?
 
 
@@ -663,11 +755,15 @@ jobs:
         shell: powershell
         run: |
           if (-not (Test-Path "build\Release\app.exe")) {
-              Write-Error "ERROR: build\Release\app.exe was not generated."
+
+              Write-Error `
+                "ERROR: build\Release\app.exe was not generated."
+
               exit 1
           }
 
-          Get-Item "build\Release\app.exe"
+          Get-Item `
+            "build\Release\app.exe"
 
 
       # ========================================================
@@ -709,7 +805,10 @@ jobs:
             Select-Object -First 1
 
           if (-not $msi) {
-              Write-Error "ERROR: MSI package was not generated."
+
+              Write-Error `
+                "ERROR: MSI package was not generated."
+
               exit 1
           }
 
@@ -731,16 +830,20 @@ jobs:
 
           Get-ChildItem dist
 
-          $count = (Get-ChildItem dist -File).Count
+          $count = `
+            (Get-ChildItem dist -File).Count
 
           if ($count -ne 1) {
-              Write-Error "Expected exactly one MSI."
+
+              Write-Error `
+                "Expected exactly one MSI."
+
               exit 1
           }
 
 
       # ========================================================
-      # UPLOAD
+      # UPLOAD WINDOWS ARTIFACT
       # ========================================================
 
       - name: Upload Windows package
@@ -753,7 +856,7 @@ jobs:
 
 
   # ============================================================
-  # RELEASE
+  # GITHUB RELEASE
   # ============================================================
 
   release:
@@ -771,7 +874,7 @@ jobs:
     steps:
 
       # ========================================================
-      # DOWNLOAD ARTIFACTS
+      # DOWNLOAD ALL ARTIFACTS
       # ========================================================
 
       - name: Download all packages
@@ -783,7 +886,7 @@ jobs:
 
 
       # ========================================================
-      # VERIFY
+      # VERIFY RELEASE
       # ========================================================
 
       - name: Verify release assets
@@ -798,30 +901,32 @@ jobs:
             -printf "%f\n" \
             | sort
 
-          echo
-          echo "Package count:"
-
           COUNT=$(find release-assets \
             -maxdepth 1 \
             -type f \
             | wc -l)
 
+          echo
+          echo "Package count:"
           echo "$COUNT"
 
           if [ "$COUNT" -ne 7 ]; then
+
             echo
-            echo "ERROR: Expected exactly 7 release packages."
+            echo "ERROR: Expected exactly 7 packages."
+
             echo
             echo "Expected:"
             echo "  3 x Linux x86_64"
             echo "  3 x Linux ARM64"
             echo "  1 x Windows x86_64"
+
             exit 1
           fi
 
 
       # ========================================================
-      # CREATE RELEASE
+      # CREATE GITHUB RELEASE
       # ========================================================
 
       - name: Create GitHub Release
