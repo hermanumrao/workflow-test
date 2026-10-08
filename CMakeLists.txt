@@ -112,11 +112,20 @@ set(CPACK_WIX_UPGRADE_GUID
 )
 
 set(CPACK_WIX_PRODUCT_GUID
-    "B1F5A8C4-6D2E-4A93-9F71-3C8E5D2A7B46"
+
+
+# -------------------------------------------------------------
+# Windows MSI / WiX
+# -------------------------------------------------------------
+
+set(CPACK_WIX_VERSION "3")
+
+set(CPACK_WIX_UPGRADE_GUID
+    "7D5E6F3A-2D94-4F7B-8C4A-9E8D7B6A5C21"
 )
 
-set(CPACK_WIX_PRODUCT_ICON
-    ""
+set(CPACK_WIX_PRODUCT_GUID
+    "B1F5A8C4-6D2E-4A93-9F71-3C8E5D2A7B46"
 )
 
 set(CPACK_START_MENU_SHORTCUTS
@@ -126,6 +135,7 @@ set(CPACK_START_MENU_SHORTCUTS
 set(CPACK_DESKTOP_SHORTCUTS
     CppDevOpsDemo
 )
+
 
 # -------------------------------------------------------------
 # CPack generators

@@ -5,43 +5,54 @@ on:
     tags:
       - "v*"
 
+  workflow_dispatch:
+
 permissions:
   contents: write
 
 jobs:
 
-  # ==========================================================
-  # LINUX PACKAGES
-  # ==========================================================
+  # ============================================================
+  # LINUX
+  # ============================================================
 
   linux:
     name: Linux ${{ matrix.arch }}
+
     runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
+
       matrix:
         include:
 
           # ----------------------------------------------------
-          # Linux x86_64
+          # x86_64
           # ----------------------------------------------------
+
           - arch: x86_64
             runner: ubuntu-24.04
-            linuxdeploy: linuxdeploy-x86_64.AppImage
+
+            appimage_tool: linuxdeploy-x86_64.AppImage
+
             appimage_name: CppDevOpsDemo-linux-x86_64.AppImage
             deb_name: CppDevOpsDemo-linux-x86_64.deb
             rpm_name: CppDevOpsDemo-linux-x86_64.rpm
 
           # ----------------------------------------------------
-          # Linux ARM64
+          # ARM64
           # ----------------------------------------------------
+
           - arch: arm64
             runner: ubuntu-24.04-arm
-            linuxdeploy: linuxdeploy-aarch64.AppImage
+
+            appimage_tool: linuxdeploy-aarch64.AppImage
+
             appimage_name: CppDevOpsDemo-linux-arm64.AppImage
             deb_name: CppDevOpsDemo-linux-arm64.deb
             rpm_name: CppDevOpsDemo-linux-arm64.rpm
+
 
     steps:
 
@@ -49,15 +60,40 @@ jobs:
       # CHECKOUT
       # ========================================================
 
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
 
       # ========================================================
-      # INSTALL DEPENDENCIES
+      # SYSTEM INFORMATION
       # ========================================================
 
-      - name: Install Linux dependencies
+      - name: Show system information
+        run: |
+          echo "=========================================="
+          echo "System"
+          echo "=========================================="
+
+          uname -a
+
+          echo
+          echo "Architecture:"
+          uname -m
+
+          echo
+          echo "CMake:"
+          cmake --version
+
+          echo
+          echo "Compiler:"
+          g++ --version
+
+
+      # ========================================================
+      # INSTALL LINUX PACKAGING DEPENDENCIES
+      # ========================================================
+
+      - name: Install packaging dependencies
         run: |
           sudo apt-get update
 
@@ -68,11 +104,47 @@ jobs:
             rpm \
             file \
             wget \
+            curl \
             fuse3
+
+          echo
+          echo "=========================================="
+          echo "Packaging tools"
+          echo "=========================================="
+
+          which dpkg-deb
+          which rpm
+          which rpmbuild || true
+
+          echo
+          echo "RPM:"
+          rpm --version || true
+
+          echo
+          echo "rpmbuild:"
+          rpmbuild --version || true
 
 
       # ========================================================
-      # CONFIGURE CMAKE
+      # HARD FAIL IF RPM BUILD TOOL IS MISSING
+      # ========================================================
+
+      - name: Verify RPM build environment
+        run: |
+          if ! command -v rpmbuild >/dev/null 2>&1; then
+            echo "ERROR: rpmbuild is not available."
+            echo
+            echo "Installed RPM tools:"
+            dpkg -l | grep -E '^ii.*rpm' || true
+            exit 1
+          fi
+
+          echo "rpmbuild is available:"
+          rpmbuild --version
+
+
+      # ========================================================
+      # CONFIGURE
       # ========================================================
 
       - name: Configure CMake
@@ -84,7 +156,22 @@ jobs:
 
 
       # ========================================================
-      # BUILD APPLICATION
+      # SHOW CMAKE TARGET ARCHITECTURE
+      # ========================================================
+
+      - name: Show CMake architecture
+        run: |
+          echo "=========================================="
+          echo "CMake architecture"
+          echo "=========================================="
+
+          grep \
+            -E "CMAKE_SYSTEM_NAME|CMAKE_SYSTEM_PROCESSOR|CMAKE_CXX_COMPILER" \
+            build/CMakeCache.txt || true
+
+
+      # ========================================================
+      # BUILD
       # ========================================================
 
       - name: Build application
@@ -96,43 +183,59 @@ jobs:
 
 
       # ========================================================
-      # VERIFY ARCHITECTURE
+      # VERIFY EXECUTABLE
       # ========================================================
 
       - name: Verify executable
         run: |
-          echo "========================================"
+          echo "=========================================="
           echo "Executable"
-          echo "========================================"
+          echo "=========================================="
+
+          if [ ! -f build/app ]; then
+            echo "ERROR: build/app was not generated."
+            exit 1
+          fi
 
           file build/app
 
           echo
-          echo "Runner architecture:"
+          echo "Runner:"
           uname -m
 
 
       # ========================================================
-      # BUILD DEB
+      # PREPARE DIST
       # ========================================================
 
-      - name: Build DEB package
+      - name: Prepare distribution directory
         run: |
+          rm -rf dist
           mkdir -p dist
 
+
+      # ========================================================
+      # DEB
+      # ========================================================
+
+      - name: Build DEB
+        run: |
           cd build
 
-          cpack -G DEB
+          cpack \
+            -G DEB \
+            -B ../dist
 
-          cp ./*.deb ../dist/
-
-
-      - name: Rename DEB package
+      - name: Rename DEB
         run: |
-          DEB_FILE=$(find dist -maxdepth 1 -type f -name "*.deb" | head -n 1)
+          DEB_FILE=$(find dist \
+            -maxdepth 1 \
+            -type f \
+            -name "*.deb" \
+            | head -n 1)
 
           if [ -z "$DEB_FILE" ]; then
-            echo "ERROR: DEB package was not generated."
+            echo "ERROR: No DEB package was generated."
             exit 1
           fi
 
@@ -142,26 +245,27 @@ jobs:
 
 
       # ========================================================
-      # BUILD RPM
+      # RPM
       # ========================================================
 
-      - name: Build RPM package
+      - name: Build RPM
         run: |
-          mkdir -p dist
-
           cd build
 
-          cpack -G RPM
+          cpack \
+            -G RPM \
+            -B ../dist
 
-          cp ./*.rpm ../dist/
-
-
-      - name: Rename RPM package
+      - name: Rename RPM
         run: |
-          RPM_FILE=$(find dist -maxdepth 1 -type f -name "*.rpm" | head -n 1)
+          RPM_FILE=$(find dist \
+            -maxdepth 1 \
+            -type f \
+            -name "*.rpm" \
+            | head -n 1)
 
           if [ -z "$RPM_FILE" ]; then
-            echo "ERROR: RPM package was not generated."
+            echo "ERROR: No RPM package was generated."
             exit 1
           fi
 
@@ -176,11 +280,20 @@ jobs:
 
       - name: Download linuxdeploy
         run: |
-          wget -q \
-            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.linuxdeploy }}" \
-            -O linuxdeploy.AppImage
+          echo "Downloading:"
+          echo "${{ matrix.appimage_tool }}"
+
+          wget \
+            --fail \
+            --show-progress \
+            -O linuxdeploy.AppImage \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.appimage_tool }}"
 
           chmod +x linuxdeploy.AppImage
+
+          echo
+          echo "linuxdeploy:"
+          file linuxdeploy.AppImage
 
 
       # ========================================================
@@ -193,21 +306,23 @@ jobs:
 
           mkdir -p \
             AppDir/usr/bin \
-            AppDir/usr/share/applications \
-            AppDir/usr/share/icons/hicolor/256x256/apps
+            AppDir/usr/share/applications
 
           cp \
             build/app \
             AppDir/usr/bin/app
 
+          chmod +x \
+            AppDir/usr/bin/app
+
 
       # ========================================================
-      # CREATE DESKTOP FILE
+      # DESKTOP ENTRY
       # ========================================================
 
       - name: Create desktop entry
         run: |
-          cat > AppDir/usr/share/applications/CppDevOpsDemo.desktop << 'EOF'
+          cat > AppDir/CppDevOpsDemo.desktop << 'EOF'
           [Desktop Entry]
           Type=Application
           Name=CppDevOpsDemo
@@ -218,8 +333,8 @@ jobs:
           EOF
 
           cp \
-            AppDir/usr/share/applications/CppDevOpsDemo.desktop \
-            AppDir/CppDevOpsDemo.desktop
+            AppDir/CppDevOpsDemo.desktop \
+            AppDir/usr/share/applications/CppDevOpsDemo.desktop
 
 
       # ========================================================
@@ -227,6 +342,8 @@ jobs:
       # ========================================================
 
       - name: Build AppImage
+        env:
+          NO_STRIP: "1"
         run: |
           ./linuxdeploy.AppImage \
             --appimage-extract-and-run \
@@ -235,7 +352,7 @@ jobs:
 
 
       # ========================================================
-      # RENAME APPIMAGE
+      # FIND APPIMAGE
       # ========================================================
 
       - name: Rename AppImage
@@ -256,17 +373,20 @@ jobs:
             "$APPIMAGE_FILE" \
             "dist/${{ matrix.appimage_name }}"
 
+          chmod +x \
+            "dist/${{ matrix.appimage_name }}"
+
 
       # ========================================================
-      # VERIFY LINUX PACKAGES
+      # VERIFY ALL PACKAGES
       # ========================================================
 
-      - name: Verify Linux packages
+      - name: Verify packages
         run: |
           echo
-          echo "========================================"
-          echo "Generated Linux packages"
-          echo "========================================"
+          echo "=========================================="
+          echo "FINAL PACKAGES"
+          echo "=========================================="
 
           ls -lh dist/
 
@@ -274,25 +394,42 @@ jobs:
           echo "File information:"
           file dist/*
 
+          echo
+          echo "Package count:"
+
+          COUNT=$(find dist \
+            -maxdepth 1 \
+            -type f \
+            | wc -l)
+
+          echo "$COUNT"
+
+          if [ "$COUNT" -ne 3 ]; then
+            echo "ERROR: Expected exactly 3 Linux packages."
+            exit 1
+          fi
+
 
       # ========================================================
-      # UPLOAD LINUX ARTIFACTS
+      # UPLOAD
       # ========================================================
 
       - name: Upload Linux packages
         uses: actions/upload-artifact@v4
+
         with:
           name: linux-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
 
-  # ==========================================================
-  # WINDOWS MSI
-  # ==========================================================
+  # ============================================================
+  # WINDOWS
+  # ============================================================
 
   windows:
     name: Windows x86_64
+
     runs-on: windows-latest
 
     steps:
@@ -301,22 +438,92 @@ jobs:
       # CHECKOUT
       # ========================================================
 
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
 
       # ========================================================
-      # INSTALL WIX
+      # SYSTEM INFORMATION
+      # ========================================================
+
+      - name: Show Windows environment
+        shell: powershell
+        run: |
+          Write-Host "=========================================="
+          Write-Host "Windows environment"
+          Write-Host "=========================================="
+
+          Write-Host "Architecture:"
+          $env:PROCESSOR_ARCHITECTURE
+
+          Write-Host ""
+          Write-Host "CMake:"
+          cmake --version
+
+
+      # ========================================================
+      # CHECK WIX
+      # ========================================================
+
+      - name: Check WiX
+        shell: powershell
+        run: |
+          Write-Host "=========================================="
+          Write-Host "WiX"
+          Write-Host "=========================================="
+
+          $wix = Get-Command candle.exe -ErrorAction SilentlyContinue
+
+          if ($wix) {
+              Write-Host "WiX already available:"
+              $wix.Source
+          }
+          else {
+              Write-Host "WiX not found."
+          }
+
+
+      # ========================================================
+      # INSTALL WIX 3.14
       # ========================================================
 
       - name: Install WiX Toolset
         shell: powershell
         run: |
-          choco install wixtoolset --version=3.14.1 --no-progress -y
+          $wix = Get-Command candle.exe -ErrorAction SilentlyContinue
+
+          if (-not $wix) {
+              choco install wixtoolset `
+                --version=3.14.1 `
+                --no-progress `
+                -y
+          }
+
+          Write-Host ""
+          Write-Host "Searching for candle.exe..."
+
+          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+
+          if (-not $candle) {
+              $paths = @(
+                  "C:\Program Files (x86)\WiX Toolset v3.14\bin",
+                  "C:\Program Files (x86)\WiX Toolset v3.11\bin"
+              )
+
+              foreach ($path in $paths) {
+                  if (Test-Path "$path\candle.exe") {
+                      $env:PATH = "$path;$env:PATH"
+                      break
+                  }
+              }
+          }
+
+          candle.exe -?
+          light.exe -?
 
 
       # ========================================================
-      # CONFIGURE CMAKE
+      # CONFIGURE
       # ========================================================
 
       - name: Configure CMake
@@ -329,7 +536,7 @@ jobs:
 
 
       # ========================================================
-      # BUILD APPLICATION
+      # BUILD
       # ========================================================
 
       - name: Build application
@@ -342,18 +549,37 @@ jobs:
 
 
       # ========================================================
-      # VERIFY EXECUTABLE
+      # VERIFY
       # ========================================================
 
       - name: Verify executable
         shell: powershell
         run: |
           if (-not (Test-Path "build\Release\app.exe")) {
-              Write-Error "Application executable was not generated."
+              Write-Error "ERROR: build\Release\app.exe was not generated."
               exit 1
           }
 
           Get-Item "build\Release\app.exe"
+
+
+      # ========================================================
+      # PREPARE DIST
+      # ========================================================
+
+      - name: Prepare distribution directory
+        shell: powershell
+        run: |
+          Remove-Item `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue `
+            dist
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            dist
 
 
       # ========================================================
@@ -363,14 +589,11 @@ jobs:
       - name: Build MSI
         shell: powershell
         run: |
-          New-Item `
-            -ItemType Directory `
-            -Force `
-            -Path dist
-
           Push-Location build
 
-          cpack -G WIX
+          cpack `
+            -G WIX `
+            -C Release
 
           Pop-Location
 
@@ -379,7 +602,7 @@ jobs:
             Select-Object -First 1
 
           if (-not $msi) {
-              Write-Error "MSI package was not generated."
+              Write-Error "ERROR: MSI package was not generated."
               exit 1
           }
 
@@ -395,28 +618,36 @@ jobs:
       - name: Verify MSI
         shell: powershell
         run: |
-          echo "========================================"
-          echo "Generated Windows package"
-          echo "========================================"
+          Write-Host "=========================================="
+          Write-Host "MSI"
+          Write-Host "=========================================="
 
           Get-ChildItem dist
 
+          $count = (Get-ChildItem dist -File).Count
+
+          if ($count -ne 1) {
+              Write-Error "Expected exactly one MSI."
+              exit 1
+          }
+
 
       # ========================================================
-      # UPLOAD MSI
+      # UPLOAD
       # ========================================================
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
+
         with:
           name: windows-x86_64
           path: dist/*
           if-no-files-found: error
 
 
-  # ==========================================================
-  # GITHUB RELEASE
-  # ==========================================================
+  # ============================================================
+  # RELEASE
+  # ============================================================
 
   release:
     name: Publish GitHub Release
@@ -433,45 +664,62 @@ jobs:
     steps:
 
       # ========================================================
-      # DOWNLOAD ALL ARTIFACTS
+      # DOWNLOAD ARTIFACTS
       # ========================================================
 
       - name: Download all packages
         uses: actions/download-artifact@v4
+
         with:
           path: release-assets
           merge-multiple: true
 
 
       # ========================================================
-      # VERIFY RELEASE FILES
+      # VERIFY
       # ========================================================
 
       - name: Verify release assets
         run: |
-          echo "========================================"
-          echo "Release assets"
-          echo "========================================"
+          echo "=========================================="
+          echo "RELEASE ASSETS"
+          echo "=========================================="
 
           find release-assets \
             -maxdepth 1 \
             -type f \
-            -print
+            -printf "%f\n" \
+            | sort
 
           echo
-          echo "Number of packages:"
-          find release-assets \
+          echo "Package count:"
+
+          COUNT=$(find release-assets \
             -maxdepth 1 \
             -type f \
-            | wc -l
+            | wc -l)
+
+          echo "$COUNT"
+
+          if [ "$COUNT" -ne 7 ]; then
+            echo
+            echo "ERROR: Expected exactly 7 release packages."
+            echo
+            echo "Expected:"
+            echo "  3 x Linux x86_64"
+            echo "  3 x Linux ARM64"
+            echo "  1 x Windows x86_64"
+            exit 1
+          fi
 
 
       # ========================================================
-      # CREATE GITHUB RELEASE
+      # CREATE RELEASE
       # ========================================================
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+
         with:
           generate_release_notes: true
 
