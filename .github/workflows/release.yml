@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build and Release Packages
 
 on:
   push:
@@ -6,24 +6,30 @@ on:
       - 'v*'
 
 jobs:
-  build-and-release:
-    name: Build on ${{ matrix.os }}
+  # -------------------------------------------------------------
+  # STAGE 1: Build Packages (.deb, .AppImage, .msi)
+  # -------------------------------------------------------------
+  build:
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    
-    # ADD THIS SECTION:
-    permissions:
-      contents: write
-
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
         include:
+          # Linux x86_64 (.deb & .AppImage)
           - os: ubuntu-latest
-            artifact_name: app-linux
-            asset_name: app-linux.tar.gz
+            target: linux-x86_64
+            pkg_type: linux
+
+          # Linux ARM64 / Raspberry Pi 5 (.deb)
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            pkg_type: linux-arm
+
+          # Windows x86_64 (.msi)
           - os: windows-latest
-            artifact_name: app-windows.exe
-            asset_name: app-windows.zip
+            target: windows-x86_64
+            pkg_type: windows
 
     steps:
       - name: Checkout repository
@@ -32,21 +38,83 @@ jobs:
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build C++ Application
+      - name: Build C++ Executable
         run: cmake --build build --config Release
 
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
+      # ---------------------------------------------------------
+      # LINUX PACKAGING (.deb & .AppImage)
+      # ---------------------------------------------------------
+      - name: Build DEB Package
+        if: matrix.pkg_type == 'linux' || matrix.pkg_type == 'linux-arm'
         run: |
-          mv build/app app-linux
-          tar -czvf app-linux.tar.gz app-linux
+          cd build
+          cpack -G DEB
+          mkdir -p ../dist
+          cp *.deb ../dist/
 
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
+      - name: Build AppImage (Linux x86_64)
+        if: matrix.pkg_type == 'linux'
         run: |
-          Compress-Archive -Path build/Release/app.exe -DestinationPath app-windows.zip
+          # Fetch linuxdeploy tool
+          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+          
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin
+          cp build/app AppDir/usr/bin/
+          
+          # Generate desktop integration files
+          echo "[Desktop Entry]\nType=Application\nName=CppDevOpsDemo\nExec=app\nCategories=Utility;" > AppDir/app.desktop
+          touch AppDir/app.png
+          
+          # Extract and run linuxdeploy to produce AppImage
+          ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run --appdir AppDir --output appimage
+          
+          mv CppDevOpsDemo-*.AppImage dist/CppDevOpsDemo-x86_64.AppImage
 
-      - name: Upload Release Asset
+      # ---------------------------------------------------------
+      # WINDOWS PACKAGING (.msi)
+      # ---------------------------------------------------------
+      - name: Install WiX Toolset (Windows)
+        if: matrix.pkg_type == 'windows'
+        run: dotnet tool install --global wix
+
+      - name: Build MSI Installer (Windows)
+        if: matrix.pkg_type == 'windows'
+        run: |
+          cd build
+          cpack -G WIX
+          mkdir -p ..\dist
+          copy *.msi ..\dist\
+
+      # Save packaged outputs as artifacts
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.target }}
+          path: dist/*
+
+  # -------------------------------------------------------------
+  # STAGE 2: Publish All Packages to GitHub Release
+  # -------------------------------------------------------------
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-assets
+          pattern: 'packages-*'
+          merge-multiple: true
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.asset_name }}
+          files: ./release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
