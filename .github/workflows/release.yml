@@ -309,40 +309,40 @@ jobs:
           echo "Downloaded files:"
           find . -maxdepth 2 -type f -print
 
-            # ========================================================
-            # VERIFY LINUXDEPLOY ARCHITECTURE
-            # ========================================================
+        # ========================================================
+        # VERIFY LINUXDEPLOY ARCHITECTURE
+        # ========================================================
 
-            - name: Verify linuxdeploy architecture
-              run: |
-                MACHINE=$(uname -m)
+        - name: Verify linuxdeploy architecture
+          run: |
+            MACHINE=$(uname -m)
 
-                echo "Runner:"
-                echo "$MACHINE"
+            echo "Runner:"
+            echo "$MACHINE"
 
-                echo
-                echo "linuxdeploy:"
-                file linuxdeploy.AppImage
+            echo
+            echo "linuxdeploy:"
+            file linuxdeploy.AppImage
 
-                if [ "$MACHINE" = "x86_64" ]; then
+            if [ "$MACHINE" = "x86_64" ]; then
 
-                  if ! file linuxdeploy.AppImage | grep -qi "x86-64"; then
-                    echo "ERROR: linuxdeploy is not an x86_64 binary."
-                    exit 1
-                  fi
+              if ! file linuxdeploy.AppImage | grep -qi "x86-64"; then
+                echo "ERROR: linuxdeploy is not an x86_64 binary."
+                exit 1
+              fi
 
-                elif [ "$MACHINE" = "aarch64" ]; then
+            elif [ "$MACHINE" = "aarch64" ]; then
 
-                  if ! file linuxdeploy.AppImage | grep -qi "ARM aarch64"; then
-                    echo "ERROR: linuxdeploy is not an ARM64 binary."
-                    exit 1
-                  fi
+              if ! file linuxdeploy.AppImage | grep -qi "ARM aarch64"; then
+                echo "ERROR: linuxdeploy is not an ARM64 binary."
+                exit 1
+              fi
 
-                else
-                  echo "ERROR: Unsupported architecture:"
-                  echo "$MACHINE"
-                  exit 1
-                fi
+            else
+              echo "ERROR: Unsupported architecture:"
+              echo "$MACHINE"
+              exit 1
+            fi
 
 
       # ========================================================
