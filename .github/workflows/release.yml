@@ -3,130 +3,483 @@ name: Build and Release Packages
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+
+permissions:
+  contents: write
 
 jobs:
-  # -------------------------------------------------------------
-  # STAGE 1: Build Packages (.deb, .AppImage, .msi)
-  # -------------------------------------------------------------
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+
+  # ==========================================================
+  # LINUX PACKAGES
+  # ==========================================================
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64 (.deb & .AppImage)
-          - os: ubuntu-latest
-            target: linux-x86_64
-            pkg_type: linux
 
-          # Linux ARM64 / Raspberry Pi 5 (.deb)
-          - os: ubuntu-24.04-arm
-            target: linux-arm64
-            pkg_type: linux-arm
+          # ----------------------------------------------------
+          # Linux x86_64
+          # ----------------------------------------------------
+          - arch: x86_64
+            runner: ubuntu-24.04
+            linuxdeploy: linuxdeploy-x86_64.AppImage
+            appimage_name: CppDevOpsDemo-linux-x86_64.AppImage
+            deb_name: CppDevOpsDemo-linux-x86_64.deb
+            rpm_name: CppDevOpsDemo-linux-x86_64.rpm
 
-          # Windows x86_64 (.msi)
-          - os: windows-latest
-            target: windows-x86_64
-            pkg_type: windows
+          # ----------------------------------------------------
+          # Linux ARM64
+          # ----------------------------------------------------
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            linuxdeploy: linuxdeploy-aarch64.AppImage
+            appimage_name: CppDevOpsDemo-linux-arm64.AppImage
+            deb_name: CppDevOpsDemo-linux-arm64.deb
+            rpm_name: CppDevOpsDemo-linux-arm64.rpm
 
     steps:
+
+      # ========================================================
+      # CHECKOUT
+      # ========================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
+      # ========================================================
+      # INSTALL DEPENDENCIES
+      # ========================================================
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            dpkg-dev \
+            rpm \
+            file \
+            wget \
+            fuse3
+
+
+      # ========================================================
+      # CONFIGURE CMAKE
+      # ========================================================
+
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build C++ Executable
-        run: cmake --build build --config Release
-
-      # ---------------------------------------------------------
-      # LINUX PACKAGING (.deb & .AppImage)
-      # ---------------------------------------------------------
-      - name: Build DEB Package
-        if: matrix.pkg_type == 'linux' || matrix.pkg_type == 'linux-arm'
         run: |
-          cd build
-          cpack -G DEB
-          mkdir -p ../dist
-          cp *.deb ../dist/
+          cmake \
+            -S . \
+            -B build \
+            -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build AppImage (Linux x86_64)
-        if: matrix.pkg_type == 'linux'
+
+      # ========================================================
+      # BUILD APPLICATION
+      # ========================================================
+
+      - name: Build application
         run: |
-          # Download linuxdeploy and appimage plugin
-          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
+          cmake \
+            --build build \
+            --config Release \
+            --parallel
 
-          # Setup AppDir
-          mkdir -p AppDir/usr/bin
-          cp build/app AppDir/usr/bin/
 
-          # Create a valid desktop file using multiline block
-          cat << 'EOF' > AppDir/app.desktop
-            [Desktop Entry]
-            Type=Application
-            Name=CppDevOpsDemo
-            Exec=app
-            Icon=app
-            Categories=Utility;
-            EOF
+      # ========================================================
+      # VERIFY ARCHITECTURE
+      # ========================================================
 
-          # Create a placeholder icon
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
-          convert -size 256x256 xc:blue AppDir/usr/share/icons/hicolor/256x256/apps/app.png || touch AppDir/app.png
+      - name: Verify executable
+        run: |
+          echo "========================================"
+          echo "Executable"
+          echo "========================================"
 
-          # Build AppImage
-          ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run --appdir AppDir --output appimage
+          file build/app
 
+          echo
+          echo "Runner architecture:"
+          uname -m
+
+
+      # ========================================================
+      # BUILD DEB
+      # ========================================================
+
+      - name: Build DEB package
+        run: |
           mkdir -p dist
-          mv CppDevOpsDemo-*.AppImage dist/CppDevOpsDemo-x86_64.AppImage
 
-      
-      # ---------------------------------------------------------
-      # WINDOWS PACKAGING (.msi)
-      # ---------------------------------------------------------
-      - name: Install WiX Toolset (Windows)
-        if: matrix.pkg_type == 'windows'
-        run: dotnet tool install --global wix
-
-      - name: Build MSI Installer (Windows)
-        if: matrix.pkg_type == 'windows'
-        run: |
           cd build
-          cpack -G WIX
-          mkdir -p ..\dist
-          copy *.msi ..\dist\
 
-      # Save packaged outputs as artifacts
-      - name: Upload Build Artifacts
+          cpack -G DEB
+
+          cp ./*.deb ../dist/
+
+
+      - name: Rename DEB package
+        run: |
+          DEB_FILE=$(find dist -maxdepth 1 -type f -name "*.deb" | head -n 1)
+
+          if [ -z "$DEB_FILE" ]; then
+            echo "ERROR: DEB package was not generated."
+            exit 1
+          fi
+
+          mv \
+            "$DEB_FILE" \
+            "dist/${{ matrix.deb_name }}"
+
+
+      # ========================================================
+      # BUILD RPM
+      # ========================================================
+
+      - name: Build RPM package
+        run: |
+          mkdir -p dist
+
+          cd build
+
+          cpack -G RPM
+
+          cp ./*.rpm ../dist/
+
+
+      - name: Rename RPM package
+        run: |
+          RPM_FILE=$(find dist -maxdepth 1 -type f -name "*.rpm" | head -n 1)
+
+          if [ -z "$RPM_FILE" ]; then
+            echo "ERROR: RPM package was not generated."
+            exit 1
+          fi
+
+          mv \
+            "$RPM_FILE" \
+            "dist/${{ matrix.rpm_name }}"
+
+
+      # ========================================================
+      # DOWNLOAD LINUXDEPLOY
+      # ========================================================
+
+      - name: Download linuxdeploy
+        run: |
+          wget -q \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.linuxdeploy }}" \
+            -O linuxdeploy.AppImage
+
+          chmod +x linuxdeploy.AppImage
+
+
+      # ========================================================
+      # CREATE APPDIR
+      # ========================================================
+
+      - name: Create AppDir
+        run: |
+          rm -rf AppDir
+
+          mkdir -p \
+            AppDir/usr/bin \
+            AppDir/usr/share/applications \
+            AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp \
+            build/app \
+            AppDir/usr/bin/app
+
+
+      # ========================================================
+      # CREATE DESKTOP FILE
+      # ========================================================
+
+      - name: Create desktop entry
+        run: |
+          cat > AppDir/usr/share/applications/CppDevOpsDemo.desktop << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=CppDevOpsDemo
+          Comment=Automated Cross-Platform C++ Application
+          Exec=app
+          Terminal=true
+          Categories=Utility;
+          EOF
+
+          cp \
+            AppDir/usr/share/applications/CppDevOpsDemo.desktop \
+            AppDir/CppDevOpsDemo.desktop
+
+
+      # ========================================================
+      # BUILD APPIMAGE
+      # ========================================================
+
+      - name: Build AppImage
+        run: |
+          ./linuxdeploy.AppImage \
+            --appimage-extract-and-run \
+            --appdir AppDir \
+            --output appimage
+
+
+      # ========================================================
+      # RENAME APPIMAGE
+      # ========================================================
+
+      - name: Rename AppImage
+        run: |
+          APPIMAGE_FILE=$(find . \
+            -maxdepth 1 \
+            -type f \
+            -name "*.AppImage" \
+            ! -name "linuxdeploy.AppImage" \
+            | head -n 1)
+
+          if [ -z "$APPIMAGE_FILE" ]; then
+            echo "ERROR: AppImage was not generated."
+            exit 1
+          fi
+
+          mv \
+            "$APPIMAGE_FILE" \
+            "dist/${{ matrix.appimage_name }}"
+
+
+      # ========================================================
+      # VERIFY LINUX PACKAGES
+      # ========================================================
+
+      - name: Verify Linux packages
+        run: |
+          echo
+          echo "========================================"
+          echo "Generated Linux packages"
+          echo "========================================"
+
+          ls -lh dist/
+
+          echo
+          echo "File information:"
+          file dist/*
+
+
+      # ========================================================
+      # UPLOAD LINUX ARTIFACTS
+      # ========================================================
+
+      - name: Upload Linux packages
         uses: actions/upload-artifact@v4
         with:
-          name: packages-${{ matrix.target }}
+          name: linux-${{ matrix.arch }}
           path: dist/*
+          if-no-files-found: error
 
-  # -------------------------------------------------------------
-  # STAGE 2: Publish All Packages to GitHub Release
-  # -------------------------------------------------------------
+
+  # ==========================================================
+  # WINDOWS MSI
+  # ==========================================================
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+
+    steps:
+
+      # ========================================================
+      # CHECKOUT
+      # ========================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ========================================================
+      # INSTALL WIX
+      # ========================================================
+
+      - name: Install WiX Toolset
+        shell: powershell
+        run: |
+          choco install wixtoolset --version=3.14.1 --no-progress -y
+
+
+      # ========================================================
+      # CONFIGURE CMAKE
+      # ========================================================
+
+      - name: Configure CMake
+        shell: powershell
+        run: |
+          cmake `
+            -S . `
+            -B build `
+            -DCMAKE_BUILD_TYPE=Release
+
+
+      # ========================================================
+      # BUILD APPLICATION
+      # ========================================================
+
+      - name: Build application
+        shell: powershell
+        run: |
+          cmake `
+            --build build `
+            --config Release `
+            --parallel
+
+
+      # ========================================================
+      # VERIFY EXECUTABLE
+      # ========================================================
+
+      - name: Verify executable
+        shell: powershell
+        run: |
+          if (-not (Test-Path "build\Release\app.exe")) {
+              Write-Error "Application executable was not generated."
+              exit 1
+          }
+
+          Get-Item "build\Release\app.exe"
+
+
+      # ========================================================
+      # BUILD MSI
+      # ========================================================
+
+      - name: Build MSI
+        shell: powershell
+        run: |
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path dist
+
+          Push-Location build
+
+          cpack -G WIX
+
+          Pop-Location
+
+          $msi = Get-ChildItem `
+            "build\*.msi" |
+            Select-Object -First 1
+
+          if (-not $msi) {
+              Write-Error "MSI package was not generated."
+              exit 1
+          }
+
+          Copy-Item `
+            $msi.FullName `
+            "dist\CppDevOpsDemo-windows-x86_64.msi"
+
+
+      # ========================================================
+      # VERIFY MSI
+      # ========================================================
+
+      - name: Verify MSI
+        shell: powershell
+        run: |
+          echo "========================================"
+          echo "Generated Windows package"
+          echo "========================================"
+
+          Get-ChildItem dist
+
+
+      # ========================================================
+      # UPLOAD MSI
+      # ========================================================
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+
+  # ==========================================================
+  # GITHUB RELEASE
+  # ==========================================================
+
   release:
-    name: Publish Release
-    needs: build
-    runs-on: ubuntu-latest
+    name: Publish GitHub Release
+
+    needs:
+      - linux
+      - windows
+
+    runs-on: ubuntu-24.04
+
     permissions:
       contents: write
 
     steps:
-      - name: Download all package artifacts
+
+      # ========================================================
+      # DOWNLOAD ALL ARTIFACTS
+      # ========================================================
+
+      - name: Download all packages
         uses: actions/download-artifact@v4
         with:
-          path: ./release-assets
-          pattern: 'packages-*'
+          path: release-assets
           merge-multiple: true
+
+
+      # ========================================================
+      # VERIFY RELEASE FILES
+      # ========================================================
+
+      - name: Verify release assets
+        run: |
+          echo "========================================"
+          echo "Release assets"
+          echo "========================================"
+
+          find release-assets \
+            -maxdepth 1 \
+            -type f \
+            -print
+
+          echo
+          echo "Number of packages:"
+          find release-assets \
+            -maxdepth 1 \
+            -type f \
+            | wc -l
+
+
+      # ========================================================
+      # CREATE GITHUB RELEASE
+      # ========================================================
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ./release-assets/*
+          generate_release_notes: true
+
+          files: |
+            release-assets/*.AppImage
+            release-assets/*.deb
+            release-assets/*.rpm
+            release-assets/*.msi
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
