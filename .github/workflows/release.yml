@@ -291,7 +291,7 @@ jobs:
 
       - name: Download linuxdeploy
         run: |
-          URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.appimage_tool }}"
+          URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/${{ matrix.linuxdeploy }}"
 
           echo "========================================"
           echo "ARCH: ${{ matrix.arch }}"
